@@ -29,6 +29,14 @@ graph LR;
 4. The proposal status becomes **Approved**, **Rejected** or **Cancelled** (see `_types.ProposalStatus_`).
 5. In case of **Approved**, a follow‑up XDR transaction (embedded in the proposal) is submitted automatically.
 
+### Voting Timeline
+
+The contract enforces strict voting deadlines:
+- Votes can only be cast **before** the `voting_ends_at` timestamp
+- Attempts to vote after the deadline will be rejected
+- Only maintainers can execute proposals **after** the voting period ends
+- Voting periods must be between 1 day and 30 days from creation
+
 ## Public vs. Anonymous voting
 
 Anonymous voting in Tansu uses a cryptographic commitment scheme (BLS12-381) to keep individual votes private until tallying. This is ideal for sensitive decisions or when you want to reduce social pressure and bias.
@@ -56,13 +64,37 @@ The helper `build_commitments_from_votes` can be called in simulation to reprodu
 
 ## Weights & quorum
 
-The effective weight of a vote is given by [`get_max_weight`](./membership.mdx). The contract does **not** impose a fixed quorum rule – instead it considers the weighted tallies:
+The effective weight of a vote is given by [`get_max_weight`](./membership.mdx). The contract implements a **supermajority governance model** that requires broad consensus before approving any proposal.
+
+### Voting Decision Logic
+
+The contract considers the weighted tallies using supermajority rules:
 
 - `approve > (abstain + reject)` → **Approved**
-- `reject > (abstain + approve)` → **Rejected**
+- `reject > (abstain + approve)` → **Rejected** 
 - Otherwise → **Cancelled** (including when approve = reject)
 
+This means that to approve a proposal, the approve votes must exceed the combined weight of all reject and abstain votes. Similarly, to reject a proposal, the reject votes must exceed the combined weight of all approve and abstain votes.
+
+### Why Supermajority?
+
+This supermajority approach ensures that:
+- **Broad consensus** is required before making changes
+- **Abstain votes matter** - they represent active participation but uncertainty
+- **Conservative governance** - proposals need clear support to pass
+- **Protection against hasty decisions** - changes require overwhelming support
+
 Custom quorum logic (percentage, thresholds…) can be built off-chain before deciding whether to call `execute`.
+
+### Voting Eligibility
+
+To cast a vote on a proposal, users must:
+- Be registered as a member using `add_member`
+- Have one or more badges assigned for the project (see [Membership & Badges](./membership.mdx))
+- Vote with a weight not exceeding their maximum allowed weight
+- Vote before the proposal's deadline
+
+Members with zero voting weight (no badges) cannot participate in voting.
 
 ## Pagination helpers
 

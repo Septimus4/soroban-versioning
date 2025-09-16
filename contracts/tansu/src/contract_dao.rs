@@ -734,14 +734,14 @@ fn tallies_to_result(
     voted_reject: u128,
     _voted_abstain: u128,
 ) -> types::ProposalStatus {
-    // Simple majority governance: abstain votes are ignored in the decision
-    // Only approve vs reject votes determine the outcome
-    // Approve wins if: approve > reject
-    // Reject wins if: reject > approve  
-    // Cancel if: approve == reject (tie)
-    if voted_approve > voted_reject {
+    // Supermajority governance: requires more than half of all votes (including abstains)
+    // This ensures broad consensus before passing any proposal
+    // Approve needs: approve > (reject + abstain)
+    // Reject needs: reject > (approve + abstain)
+    // Otherwise: cancelled (tie or no clear supermajority)
+    if voted_approve > (voted_reject + _voted_abstain) {
         types::ProposalStatus::Approved
-    } else if voted_reject > voted_approve {
+    } else if voted_reject > (voted_approve + _voted_abstain) {
         types::ProposalStatus::Rejected
     } else {
         types::ProposalStatus::Cancelled

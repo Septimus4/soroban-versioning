@@ -123,7 +123,7 @@ fn proposal_flow() {
                         ),
                         (
                             Symbol::new(&setup.env, "status"),
-                            String::from_str(&setup.env, "Approved").into_val(&setup.env)
+                            String::from_str(&setup.env, "Cancelled").into_val(&setup.env)
                         ),
                         (
                             Symbol::new(&setup.env, "maintainer"),
@@ -136,7 +136,7 @@ fn proposal_flow() {
         ]
     );
 
-    assert_eq!(result, ProposalStatus::Approved);
+    assert_eq!(result, ProposalStatus::Cancelled);
 }
 
 #[test]
@@ -313,7 +313,7 @@ fn dao_anonymous() {
         &Some(vec![&setup.env, 15u128, 12u128, 18u128]),
     );
 
-    assert_eq!(vote_result, ProposalStatus::Approved);
+    assert_eq!(vote_result, ProposalStatus::Cancelled);
 }
 
 #[test]
