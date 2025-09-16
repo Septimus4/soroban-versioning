@@ -114,6 +114,11 @@ impl DaoTrait for Tansu {
         votes: Vec<u128>,
         seeds: Vec<u128>,
     ) -> Vec<BytesN<96>> {
+        // Validate that votes and seeds have the same length
+        if votes.len() != seeds.len() {
+            panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
+        }
+
         let vote_config = Self::get_anonymous_voting_config(env.clone(), project_key);
 
         let bls12_381 = env.crypto().bls12_381();
@@ -234,12 +239,18 @@ impl DaoTrait for Tansu {
         };
 
         let next_id = proposal_id + 1;
+        let page = proposal_id / MAX_PROPOSALS_PER_PAGE;
+        
+        // Prevent exceeding maximum page limit
+        if page >= MAX_PAGES {
+            panic_with_error!(&env, &errors::ContractErrors::NoProposalorPageFound);
+        }
+
         env.storage().persistent().set(
             &types::ProjectKey::DaoTotalProposals(project_key.clone()),
             &next_id,
         );
 
-        let page = proposal_id / MAX_PROPOSALS_PER_PAGE;
         let mut dao_page = Self::get_dao(env.clone(), project_key.clone(), page);
         dao_page.proposals.push_back(proposal.clone());
 
@@ -402,7 +413,8 @@ impl DaoTrait for Tansu {
     ) -> types::ProposalStatus {
         Tansu::require_not_paused(env.clone());
 
-        maintainer.require_auth();
+        // Verify the maintainer is authorized for this project
+        crate::auth_maintainers(&env, &maintainer, &project_key);
 
         let page = proposal_id / MAX_PROPOSALS_PER_PAGE;
         let sub_id = proposal_id % MAX_PROPOSALS_PER_PAGE;
@@ -701,12 +713,16 @@ pub fn anonymous_execute(tallies: &Vec<u128>) -> types::ProposalStatus {
 fn tallies_to_result(
     voted_approve: u128,
     voted_reject: u128,
-    voted_abstain: u128,
+    _voted_abstain: u128,
 ) -> types::ProposalStatus {
-    // accept or reject if we have a majority
-    if voted_approve > (voted_abstain + voted_reject) {
+    // Supermajority governance: requires more than half of all votes (including abstains)
+    // This ensures broad consensus before passing any proposal
+    // Approve needs: approve > (reject + abstain)
+    // Reject needs: reject > (approve + abstain)
+    // Otherwise: cancelled (tie or no clear supermajority)
+    if voted_approve > (voted_reject + _voted_abstain) {
         types::ProposalStatus::Approved
-    } else if voted_reject > (voted_abstain + voted_approve) {
+    } else if voted_reject > (voted_approve + _voted_abstain) {
         types::ProposalStatus::Rejected
     } else {
         types::ProposalStatus::Cancelled
