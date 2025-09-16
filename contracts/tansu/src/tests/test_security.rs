@@ -156,3 +156,39 @@ fn test_proposal_pagination_limits() {
     
     assert_eq!(result, Err(Ok(Error::from_contract_error(ContractErrors::NoProposalorPageFound as u32))));
 }
+
+/// Test that voting is prevented after the voting deadline
+#[test]
+fn test_voting_after_deadline() {
+    let setup = create_test_data();
+    let id = init_contract(&setup);
+
+    // Add a member with voting rights
+    setup.contract.add_member(&setup.mando, &String::from_str(&setup.env, "test"));
+    setup.contract.set_badges(
+        &setup.grogu, &id, &setup.mando, 
+        &vec![&setup.env, Badge::Community]
+    );
+
+    // Create a proposal
+    let title = String::from_str(&setup.env, "Test Proposal");
+    let ipfs = String::from_str(&setup.env, "bafybeib6ioupho3p3pliusx7tgs7dvi6mpu2bwfhayj6w6ie44lo3vvc4i");
+    let voting_ends_at = setup.env.ledger().timestamp() + 3600 * 24 * 2;
+
+    let proposal_id = setup.contract.create_proposal(
+        &setup.grogu, &id, &title, &ipfs, &voting_ends_at, &true
+    );
+
+    // Fast forward past the voting deadline
+    setup.env.ledger().set_timestamp(voting_ends_at + 1);
+
+    // Try to vote after deadline - should fail
+    let late_vote = Vote::PublicVote(PublicVote {
+        address: setup.mando.clone(),
+        weight: 1_000_000, // Community badge weight
+        vote_choice: VoteChoice::Approve,
+    });
+
+    let result = setup.contract.try_vote(&setup.mando, &id, &proposal_id, &late_vote);
+    assert_eq!(result, Err(Ok(Error::from_contract_error(ContractErrors::ProposalVotingTime as u32))));
+}

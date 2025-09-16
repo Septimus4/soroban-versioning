@@ -305,6 +305,12 @@ impl DaoTrait for Tansu {
             _ => panic_with_error!(&env, &errors::ContractErrors::NoProposalorPageFound),
         };
 
+        // Check that voting period has not ended
+        let curr_timestamp = env.ledger().timestamp();
+        if curr_timestamp >= proposal.vote_data.voting_ends_at {
+            panic_with_error!(&env, &errors::ContractErrors::ProposalVotingTime);
+        }
+
         // Check vote limits for DoS protection
         if proposal.vote_data.votes.len() >= MAX_VOTES_PER_PROPOSAL {
             panic_with_error!(&env, &errors::ContractErrors::VoteLimitExceeded);
@@ -327,14 +333,16 @@ impl DaoTrait for Tansu {
             panic_with_error!(&env, &errors::ContractErrors::WrongVoteType);
         }
 
-        if !is_public_vote && let types::Vote::AnonymousVote(vote_choice) = &vote {
-            if vote_choice.commitments.len() != 3 {
-                panic_with_error!(&env, &errors::ContractErrors::BadCommitment)
+        // For anonymous votes, validate commitment structure
+        if !is_public_vote
+            && let types::Vote::AnonymousVote(vote_choice) = &vote {
+                if vote_choice.commitments.len() != 3 {
+                    panic_with_error!(&env, &errors::ContractErrors::BadCommitment)
+                }
+                for commitment in &vote_choice.commitments {
+                    G1Affine::from_bytes(commitment);
+                }
             }
-            for commitment in &vote_choice.commitments {
-                G1Affine::from_bytes(commitment);
-            }
-        }
 
         // can only vote for yourself so address must match
         let vote_address = match &vote {
@@ -356,6 +364,10 @@ impl DaoTrait for Tansu {
             project_key.clone(),
             vote_address.clone(),
         );
+
+        if voter_max_weight == 0 {
+            panic_with_error!(&env, &errors::ContractErrors::UnknownMember);
+        }
 
         if vote_weight > &voter_max_weight {
             panic_with_error!(&env, &errors::ContractErrors::VoterWeight);
@@ -437,22 +449,29 @@ impl DaoTrait for Tansu {
         // tally to results
         proposal.status = match proposal.vote_data.public_voting {
             true => {
-                if tallies.is_some() | seeds.is_some() {
+                if tallies.is_some() || seeds.is_some() {
                     panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
                 }
                 public_execute(&proposal)
             }
             false => {
-                if !(tallies.is_some() & seeds.is_some()) {
+                if !(tallies.is_some() && seeds.is_some()) {
                     panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
                 }
                 let tallies_ = tallies.unwrap();
+                let seeds_ = seeds.unwrap();
+                
+                // Validate tallies and seeds have expected length (3: approve, reject, abstain)
+                if tallies_.len() != 3 || seeds_.len() != 3 {
+                    panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
+                }
+                
                 if !Self::proof(
                     env.clone(),
                     project_key.clone(),
                     proposal.clone(),
                     tallies_.clone(),
-                    seeds.unwrap(),
+                    seeds_,
                 ) {
                     panic_with_error!(&env, &errors::ContractErrors::InvalidProof)
                 }
@@ -515,7 +534,7 @@ impl DaoTrait for Tansu {
         tallies: Vec<u128>,
         seeds: Vec<u128>,
     ) -> bool {
-        // only allow to proof if proposal is not active
+        // Proof validation only applies to active proposals (before execution)
         if proposal.status != types::ProposalStatus::Active {
             panic_with_error!(&env, &errors::ContractErrors::ProposalActive);
         }
@@ -715,14 +734,14 @@ fn tallies_to_result(
     voted_reject: u128,
     _voted_abstain: u128,
 ) -> types::ProposalStatus {
-    // Supermajority governance: requires more than half of all votes (including abstains)
-    // This ensures broad consensus before passing any proposal
-    // Approve needs: approve > (reject + abstain)
-    // Reject needs: reject > (approve + abstain)
-    // Otherwise: cancelled (tie or no clear supermajority)
-    if voted_approve > (voted_reject + _voted_abstain) {
+    // Simple majority governance: abstain votes are ignored in the decision
+    // Only approve vs reject votes determine the outcome
+    // Approve wins if: approve > reject
+    // Reject wins if: reject > approve  
+    // Cancel if: approve == reject (tie)
+    if voted_approve > voted_reject {
         types::ProposalStatus::Approved
-    } else if voted_reject > (voted_approve + _voted_abstain) {
+    } else if voted_reject > voted_approve {
         types::ProposalStatus::Rejected
     } else {
         types::ProposalStatus::Cancelled
