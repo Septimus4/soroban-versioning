@@ -115,6 +115,11 @@ impl DaoTrait for Tansu {
         votes: Vec<u128>,
         seeds: Vec<u128>,
     ) -> Vec<BytesN<96>> {
+        // Validate that votes and seeds have the same length
+        if votes.len() != seeds.len() {
+            panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
+        }
+
         let vote_config = Self::get_anonymous_voting_config(env.clone(), project_key);
 
         let bls12_381 = env.crypto().bls12_381();
@@ -247,12 +252,18 @@ impl DaoTrait for Tansu {
         };
 
         let next_id = proposal_id + 1;
+        let page = proposal_id / MAX_PROPOSALS_PER_PAGE;
+        
+        // Prevent exceeding maximum page limit
+        if page >= MAX_PAGES {
+            panic_with_error!(&env, &errors::ContractErrors::NoProposalorPageFound);
+        }
+
         env.storage().persistent().set(
             &types::ProjectKey::DaoTotalProposals(project_key.clone()),
             &next_id,
         );
 
-        let page = proposal_id / MAX_PROPOSALS_PER_PAGE;
         let mut dao_page = Self::get_dao(env.clone(), project_key.clone(), page);
         dao_page.proposals.push_back(proposal.clone());
 
@@ -358,6 +369,12 @@ impl DaoTrait for Tansu {
             _ => panic_with_error!(&env, &errors::ContractErrors::NoProposalorPageFound),
         };
 
+        // Check that voting period has not ended
+        let curr_timestamp = env.ledger().timestamp();
+        if curr_timestamp >= proposal.vote_data.voting_ends_at {
+            panic_with_error!(&env, &errors::ContractErrors::ProposalVotingTime);
+        }
+
         // Check vote limits for DoS protection
         if proposal.vote_data.votes.len() >= MAX_VOTES_PER_PROPOSAL {
             panic_with_error!(&env, &errors::ContractErrors::VoteLimitExceeded);
@@ -380,14 +397,16 @@ impl DaoTrait for Tansu {
             panic_with_error!(&env, &errors::ContractErrors::WrongVoteType);
         }
 
-        if !is_public_vote && let types::Vote::AnonymousVote(vote_choice) = &vote {
-            if vote_choice.commitments.len() != 3 {
-                panic_with_error!(&env, &errors::ContractErrors::BadCommitment)
+        // For anonymous votes, validate commitment structure
+        if !is_public_vote
+            && let types::Vote::AnonymousVote(vote_choice) = &vote {
+                if vote_choice.commitments.len() != 3 {
+                    panic_with_error!(&env, &errors::ContractErrors::BadCommitment)
+                }
+                for commitment in &vote_choice.commitments {
+                    G1Affine::from_bytes(commitment);
+                }
             }
-            for commitment in &vote_choice.commitments {
-                G1Affine::from_bytes(commitment);
-            }
-        }
 
         // can only vote for yourself so address must match
         let vote_address = match &vote {
@@ -409,6 +428,10 @@ impl DaoTrait for Tansu {
             project_key.clone(),
             vote_address.clone(),
         );
+
+        if voter_max_weight == 0 {
+            panic_with_error!(&env, &errors::ContractErrors::UnknownMember);
+        }
 
         if vote_weight > &voter_max_weight {
             panic_with_error!(&env, &errors::ContractErrors::VoterWeight);
@@ -467,7 +490,8 @@ impl DaoTrait for Tansu {
     ) -> types::ProposalStatus {
         Tansu::require_not_paused(env.clone());
 
-        maintainer.require_auth();
+        // Verify the maintainer is authorized for this project
+        crate::auth_maintainers(&env, &maintainer, &project_key);
 
         let page = proposal_id / MAX_PROPOSALS_PER_PAGE;
         let sub_id = proposal_id % MAX_PROPOSALS_PER_PAGE;
@@ -499,22 +523,35 @@ impl DaoTrait for Tansu {
         // tally to results
         proposal.status = match proposal.vote_data.public_voting {
             true => {
-                if tallies.is_some() | seeds.is_some() {
+                if tallies.is_some() || seeds.is_some() {
                     panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
                 }
                 public_execute(&proposal)
             }
             false => {
-                if !(tallies.is_some() & seeds.is_some()) {
+                if !(tallies.is_some() && seeds.is_some()) {
                     panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
                 }
-                let tallies_ = tallies.unwrap();
+                let tallies_ = match tallies {
+                    Some(t) => t,
+                    None => panic_with_error!(&env, &errors::ContractErrors::TallySeedError),
+                };
+                let seeds_ = match seeds {
+                    Some(s) => s,
+                    None => panic_with_error!(&env, &errors::ContractErrors::TallySeedError),
+                };
+                
+                // Validate tallies and seeds have expected length (3: approve, reject, abstain)
+                if tallies_.len() != 3 || seeds_.len() != 3 {
+                    panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
+                }
+                
                 if !Self::proof(
                     env.clone(),
                     project_key.clone(),
                     proposal.clone(),
                     tallies_.clone(),
-                    seeds.unwrap(),
+                    seeds_,
                 ) {
                     panic_with_error!(&env, &errors::ContractErrors::InvalidProof)
                 }
@@ -578,7 +615,7 @@ impl DaoTrait for Tansu {
         tallies: Vec<u128>,
         seeds: Vec<u128>,
     ) -> bool {
-        // only allow to proof if proposal is not active
+        // Proof validation only applies to active proposals (before execution)
         if proposal.status != types::ProposalStatus::Active {
             panic_with_error!(&env, &errors::ContractErrors::ProposalActive);
         }
@@ -594,7 +631,9 @@ impl DaoTrait for Tansu {
             .storage()
             .instance()
             .get(&types::ProjectKey::AnonymousVoteConfig(project_key))
-            .unwrap();
+            .unwrap_or_else(|| {
+                panic_with_error!(&env, &errors::ContractErrors::NoAnonymousVotingConfig);
+            });
 
         let seed_generator_point = G1Affine::from_bytes(vote_config.seed_generator_point);
         let vote_generator_point = G1Affine::from_bytes(vote_config.vote_generator_point);
@@ -751,11 +790,23 @@ pub fn public_execute(proposal: &types::Proposal) -> types::ProposalStatus {
 /// # Returns
 /// * `types::ProposalStatus` - The final status (Approved if approve > reject, Rejected if reject > approve, Cancelled if equal)
 pub fn anonymous_execute(tallies: &Vec<u128>) -> types::ProposalStatus {
-    let mut iter = tallies.iter();
-
-    let voted_approve = iter.next().unwrap();
-    let voted_reject = iter.next().unwrap();
-    let voted_abstain = iter.next().unwrap();
+    if tallies.len() != 3 {
+        return types::ProposalStatus::Cancelled;
+    }
+        
+    // Use get() method to access elements safely
+    let voted_approve = match tallies.get(0) {
+        Some(v) => v,
+        None => return types::ProposalStatus::Cancelled,
+    };
+    let voted_reject = match tallies.get(1) {
+        Some(v) => v,
+        None => return types::ProposalStatus::Cancelled,
+    };
+    let voted_abstain = match tallies.get(2) {
+        Some(v) => v,
+        None => return types::ProposalStatus::Cancelled,
+    };
 
     tallies_to_result(voted_approve, voted_reject, voted_abstain)
 }
@@ -776,12 +827,16 @@ pub fn anonymous_execute(tallies: &Vec<u128>) -> types::ProposalStatus {
 fn tallies_to_result(
     voted_approve: u128,
     voted_reject: u128,
-    voted_abstain: u128,
+    _voted_abstain: u128,
 ) -> types::ProposalStatus {
-    // accept or reject if we have a majority
-    if voted_approve > (voted_abstain + voted_reject) {
+    // Supermajority governance: requires more than half of all votes (including abstains)
+    // This ensures broad consensus before passing any proposal
+    // Approve needs: approve > (reject + abstain)
+    // Reject needs: reject > (approve + abstain)
+    // Otherwise: cancelled (tie or no clear supermajority)
+    if voted_approve > (voted_reject + _voted_abstain) {
         types::ProposalStatus::Approved
-    } else if voted_reject > (voted_abstain + voted_approve) {
+    } else if voted_reject > (voted_approve + _voted_abstain) {
         types::ProposalStatus::Rejected
     } else {
         types::ProposalStatus::Cancelled
