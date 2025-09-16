@@ -77,7 +77,9 @@ impl VersioningTrait for Tansu {
                 .storage()
                 .instance()
                 .get(&types::DataKey::DomainContract)
-                .unwrap();
+                .unwrap_or_else(|| {
+                    panic_with_error!(&env, &errors::ContractErrors::InvalidDomainError);
+                });
 
             let contract_executable = domain_contract.address.executable();
             if contract_executable != Some(Executable::Wasm(domain_contract.wasm_hash)) {

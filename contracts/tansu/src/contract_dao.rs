@@ -458,8 +458,14 @@ impl DaoTrait for Tansu {
                 if !(tallies.is_some() && seeds.is_some()) {
                     panic_with_error!(&env, &errors::ContractErrors::TallySeedError);
                 }
-                let tallies_ = tallies.unwrap();
-                let seeds_ = seeds.unwrap();
+                let tallies_ = match tallies {
+                    Some(t) => t,
+                    None => panic_with_error!(&env, &errors::ContractErrors::TallySeedError),
+                };
+                let seeds_ = match seeds {
+                    Some(s) => s,
+                    None => panic_with_error!(&env, &errors::ContractErrors::TallySeedError),
+                };
                 
                 // Validate tallies and seeds have expected length (3: approve, reject, abstain)
                 if tallies_.len() != 3 || seeds_.len() != 3 {
@@ -550,7 +556,9 @@ impl DaoTrait for Tansu {
             .storage()
             .instance()
             .get(&types::ProjectKey::AnonymousVoteConfig(project_key))
-            .unwrap();
+            .unwrap_or_else(|| {
+                panic_with_error!(&env, &errors::ContractErrors::NoAnonymousVotingConfig);
+            });
 
         let seed_generator_point = G1Affine::from_bytes(vote_config.seed_generator_point);
         let vote_generator_point = G1Affine::from_bytes(vote_config.vote_generator_point);
@@ -707,11 +715,23 @@ pub fn public_execute(proposal: &types::Proposal) -> types::ProposalStatus {
 /// # Returns
 /// * `types::ProposalStatus` - The final status (Approved if approve > reject, Rejected if reject > approve, Cancelled if equal)
 pub fn anonymous_execute(tallies: &Vec<u128>) -> types::ProposalStatus {
-    let mut iter = tallies.iter();
-
-    let voted_approve = iter.next().unwrap();
-    let voted_reject = iter.next().unwrap();
-    let voted_abstain = iter.next().unwrap();
+    if tallies.len() != 3 {
+        return types::ProposalStatus::Cancelled;
+    }
+        
+    // Use get() method to access elements safely
+    let voted_approve = match tallies.get(0) {
+        Some(v) => v,
+        None => return types::ProposalStatus::Cancelled,
+    };
+    let voted_reject = match tallies.get(1) {
+        Some(v) => v,
+        None => return types::ProposalStatus::Cancelled,
+    };
+    let voted_abstain = match tallies.get(2) {
+        Some(v) => v,
+        None => return types::ProposalStatus::Cancelled,
+    };
 
     tallies_to_result(voted_approve, voted_reject, voted_abstain)
 }

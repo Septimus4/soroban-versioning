@@ -81,7 +81,9 @@ impl TansuTrait for Tansu {
         env.storage()
             .instance()
             .get(&types::DataKey::AdminsConfig)
-            .unwrap()
+            .unwrap_or_else(|| {
+                panic_with_error!(&env, &crate::errors::ContractErrors::UnexpectedError);
+            })
     }
 
     /// Get the current Soroban Domain contract ID.
@@ -95,7 +97,9 @@ impl TansuTrait for Tansu {
         env.storage()
             .instance()
             .get(&types::DataKey::DomainContract)
-            .unwrap()
+            .unwrap_or_else(|| {
+                panic_with_error!(&env, &crate::errors::ContractErrors::InvalidDomainError);
+            })
     }
 
     /// Set the Soroban Domain contract ID.

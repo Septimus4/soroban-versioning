@@ -32,6 +32,7 @@ graph LR;
 ### Voting Timeline
 
 The contract enforces strict voting deadlines:
+
 - Votes can only be cast **before** the `voting_ends_at` timestamp
 - Attempts to vote after the deadline will be rejected
 - Only maintainers can execute proposals **after** the voting period ends
@@ -50,8 +51,7 @@ Anonymous voting requires a one-time configuration (`anonymous_voting_setup`). T
 
 The helper `build_commitments_from_votes` can be called in simulation to reproduce the exact commitments client-side.
 
-- Each vote is committed as:  
-  $C = G(v) \cdot H(r)$ where `G`, `H` are generator points, `v` is the vote, and `r` is a random seed.
+- Each vote is committed as: $C = G(v) \cdot H(r)$ where `G`, `H` are generator points, `v` is the vote, and `r` is a random seed.
 - Only commitments are stored on-chain. The actual votes and seeds are encrypted off-chain and revealed at tally time.
 - At tally, the contract checks that the sum of commitments matches the commitments derived from the revealed tallies and seeds.
 
@@ -71,7 +71,7 @@ The effective weight of a vote is given by [`get_max_weight`](./membership.mdx).
 The contract considers the weighted tallies using supermajority rules:
 
 - `approve > (abstain + reject)` → **Approved**
-- `reject > (abstain + approve)` → **Rejected** 
+- `reject > (abstain + approve)` → **Rejected**
 - Otherwise → **Cancelled** (including when approve = reject)
 
 This means that to approve a proposal, the approve votes must exceed the combined weight of all reject and abstain votes. Similarly, to reject a proposal, the reject votes must exceed the combined weight of all approve and abstain votes.
@@ -79,6 +79,7 @@ This means that to approve a proposal, the approve votes must exceed the combine
 ### Why Supermajority?
 
 This supermajority approach ensures that:
+
 - **Broad consensus** is required before making changes
 - **Abstain votes matter** - they represent active participation but uncertainty
 - **Conservative governance** - proposals need clear support to pass
@@ -89,6 +90,7 @@ Custom quorum logic (percentage, thresholds…) can be built off-chain before de
 ### Voting Eligibility
 
 To cast a vote on a proposal, users must:
+
 - Be registered as a member using `add_member`
 - Have one or more badges assigned for the project (see [Membership & Badges](./membership.mdx))
 - Vote with a weight not exceeding their maximum allowed weight

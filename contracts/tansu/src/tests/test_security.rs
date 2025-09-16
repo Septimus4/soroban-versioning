@@ -192,3 +192,107 @@ fn test_voting_after_deadline() {
     let result = setup.contract.try_vote(&setup.mando, &id, &proposal_id, &late_vote);
     assert_eq!(result, Err(Ok(Error::from_contract_error(ContractErrors::ProposalVotingTime as u32))));
 }
+
+/// Test malformed inputs for anonymous voting tallies
+#[test]
+fn test_malformed_tallies_empty() {
+    let setup = create_test_data();
+    let id = init_contract(&setup);
+
+    // Setup anonymous voting
+    setup.contract.anonymous_voting_setup(
+        &setup.grogu,
+        &id,
+        &String::from_str(&setup.env, "test_public_key")
+    );
+
+    // Create anonymous proposal
+    let title = String::from_str(&setup.env, "Test Proposal");
+    let ipfs = String::from_str(&setup.env, "bafybeib6ioupho3p3pliusx7tgs7dvi6mpu2bwfhayj6w6ie44lo3vvc4i");
+    let voting_ends_at = setup.env.ledger().timestamp() + 3600 * 24 * 2;
+
+    let proposal_id = setup.contract.create_proposal(
+        &setup.grogu, &id, &title, &ipfs, &voting_ends_at, &false
+    );
+
+    // Fast forward past voting deadline
+    setup.env.ledger().set_timestamp(voting_ends_at + 1);
+
+    // Try to execute with empty tallies - should fail
+    let empty_tallies = vec![&setup.env];
+    let empty_seeds = vec![&setup.env];
+
+    let result = setup.contract.try_execute(
+        &setup.grogu, &id, &proposal_id, &Some(empty_tallies), &Some(empty_seeds)
+    );
+
+    assert_eq!(result, Err(Ok(Error::from_contract_error(ContractErrors::TallySeedError as u32))));
+}
+
+/// Test malformed inputs for anonymous voting tallies - wrong length
+#[test] 
+fn test_malformed_tallies_wrong_length() {
+    let setup = create_test_data();
+    let id = init_contract(&setup);
+
+    // Setup anonymous voting
+    setup.contract.anonymous_voting_setup(
+        &setup.grogu,
+        &id,
+        &String::from_str(&setup.env, "test_public_key")
+    );
+
+    // Create anonymous proposal
+    let title = String::from_str(&setup.env, "Test Proposal");
+    let ipfs = String::from_str(&setup.env, "bafybeib6ioupho3p3pliusx7tgs7dvi6mpu2bwfhayj6w6ie44lo3vvc4i");
+    let voting_ends_at = setup.env.ledger().timestamp() + 3600 * 24 * 2;
+
+    let proposal_id = setup.contract.create_proposal(
+        &setup.grogu, &id, &title, &ipfs, &voting_ends_at, &false
+    );
+
+    // Fast forward past voting deadline
+    setup.env.ledger().set_timestamp(voting_ends_at + 1);
+
+    // Try to execute with wrong length tallies (2 instead of 3) - should fail
+    let wrong_tallies = vec![&setup.env, 1u128, 2u128]; // Missing third element
+    let wrong_seeds = vec![&setup.env, 1u128, 2u128];
+
+    let result = setup.contract.try_execute(
+        &setup.grogu, &id, &proposal_id, &Some(wrong_tallies), &Some(wrong_seeds)
+    );
+
+    assert_eq!(result, Err(Ok(Error::from_contract_error(ContractErrors::TallySeedError as u32))));
+}
+
+/// Test malformed inputs for build_commitments_from_votes with mismatched lengths
+#[test]
+fn test_malformed_commitments_mismatched_lengths() {
+    let setup = create_test_data();
+    let id = init_contract(&setup);
+
+    // Setup anonymous voting
+    setup.contract.anonymous_voting_setup(
+        &setup.grogu,
+        &id,
+        &String::from_str(&setup.env, "test_public_key")
+    );
+
+    // Test mismatched votes and seeds length - votes longer
+    let result = setup.contract.try_build_commitments_from_votes(
+        &id,
+        &vec![&setup.env, 1u128, 2u128, 3u128, 4u128], // 4 votes
+        &vec![&setup.env, 1u128, 2u128, 3u128] // 3 seeds - mismatch!
+    );
+    
+    assert_eq!(result, Err(Ok(Error::from_contract_error(ContractErrors::TallySeedError as u32))));
+
+    // Test mismatched votes and seeds length - seeds longer
+    let result2 = setup.contract.try_build_commitments_from_votes(
+        &id,
+        &vec![&setup.env, 1u128, 2u128], // 2 votes
+        &vec![&setup.env, 1u128, 2u128, 3u128] // 3 seeds - mismatch!
+    );
+    
+    assert_eq!(result2, Err(Ok(Error::from_contract_error(ContractErrors::TallySeedError as u32))));
+}
