@@ -9,9 +9,8 @@ impl TansuTrait for Tansu {
     /// * `env` - The environment object
     /// * `admin` - The admin address
     fn __constructor(env: Env, admin: Address) {
-        env.storage()
-            .instance()
-            .set(&types::DataKey::Paused, &false);
+        // Require the designated admin to sign initialization.
+        admin.require_auth();
 
         // admin as sole admin (threshold = 1)
         let admins_config = types::AdminsConfig {
@@ -22,7 +21,12 @@ impl TansuTrait for Tansu {
             .instance()
             .set(&types::DataKey::AdminsConfig, &admins_config);
 
-        Self::pause(env, admin, true);
+        // Initialize the contract in paused state (single write) and emit event.
+        env.storage()
+            .instance()
+            .set(&types::DataKey::Paused, &true);
+
+        events::ContractPaused { paused: true, admin }.publish(&env);
     }
 
     /// Pause or unpause the contract (emergency stop.)
@@ -93,6 +97,8 @@ impl TansuTrait for Tansu {
     /// * `domain_contract` - The new domain contract
     fn set_domain_contract(env: Env, admin: Address, domain_contract: types::Contract) {
         auth_admin(&env, &admin);
+        // Enforce pause semantics for state-changing admin ops.
+        Self::require_not_paused(env.clone());
 
         validate_contract(&env, &domain_contract);
 
@@ -117,6 +123,8 @@ impl TansuTrait for Tansu {
     /// * `collateral_contract` - The new collateral contract
     fn set_collateral_contract(env: Env, admin: Address, collateral_contract: types::Contract) {
         auth_admin(&env, &admin);
+        // Enforce pause semantics for state-changing admin ops.
+        Self::require_not_paused(env.clone());
 
         validate_contract(&env, &collateral_contract);
 
@@ -129,7 +137,8 @@ impl TansuTrait for Tansu {
             admin,
             contract_key: String::from_str(&env, "collateral"),
             address: collateral_contract.address,
-            wasm_hash: None,
+            // Emit the provided wasm_hash (if any) for parity with domain event.
+            wasm_hash: collateral_contract.wasm_hash,
         }
         .publish(&env);
     }
@@ -152,6 +161,8 @@ impl TansuTrait for Tansu {
         new_admins_config: Option<types::AdminsConfig>,
     ) {
         auth_admin(&env, &admin);
+        // Proposing an upgrade mutates state; require not paused.
+        Self::require_not_paused(env.clone());
 
         if env
             .storage()
@@ -202,6 +213,8 @@ impl TansuTrait for Tansu {
     /// * If there is no upgrade to approve
     fn approve_upgrade(env: Env, admin: Address) {
         let admins_config = auth_admin(&env, &admin);
+        // Approving an upgrade mutates state; require not paused.
+        Self::require_not_paused(env.clone());
 
         // Get upgrade proposal
         let mut upgrade_proposal: types::UpgradeProposal = env
@@ -262,6 +275,8 @@ impl TansuTrait for Tansu {
             });
 
         if accept {
+            // Executing an upgrade should respect pause state.
+            Self::require_not_paused(env.clone());
             if (upgrade_proposal.approvals.len()) < admins_config.threshold {
                 panic_with_error!(&env, &crate::errors::ContractErrors::UpgradeError);
             }
