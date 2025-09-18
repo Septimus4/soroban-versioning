@@ -13,7 +13,6 @@ import {
 
 class GitRepositoryServiceImpl {
   private repositoryCache = new Map<string, RepositorySource>();
-  private urlParser = RepositoryFactory.getUrlParser();
 
   /**
    * Get or create a repository source for the given URL
