@@ -5,11 +5,11 @@
 import type { RepositorySource } from "./interfaces";
 import { GitCliSource } from "./GitCliSource";
 import { BrowserCompatibleSource } from "./BrowserCompatibleSource";
-import { SimpleCredentialManager } from "./CredentialManager";
+import { EnhancedCredentialManager } from "./CredentialManager";
 import { GitUrlParserImpl } from "./GitUrlParser";
 
 export class RepositoryFactory {
-  private static credentialManager = new SimpleCredentialManager();
+  private static credentialManager = new EnhancedCredentialManager();
   private static urlParser = new GitUrlParserImpl();
 
   /**

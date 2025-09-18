@@ -7,10 +7,16 @@ import type { GitUrlParser, RepositoryInfo } from "./interfaces";
 export class GitUrlParserImpl implements GitUrlParser {
   private readonly supportedHosts = [
     "github.com",
-    "gitlab.com",
+    "gitlab.com", 
     "bitbucket.org",
     "dev.azure.com",
     "vs-ssh.visualstudio.com",
+    "ssh.dev.azure.com",
+    "gitea.io",
+    "codeberg.org",
+    "gitee.com",
+    "sourceforge.net",
+    "git.sr.ht", // SourceHut
   ];
 
   parse(url: string): RepositoryInfo {
@@ -60,6 +66,45 @@ export class GitUrlParserImpl implements GitUrlParser {
       };
     }
 
+    // Handle GitLab subgroups (git@gitlab.com:group/subgroup/repo.git)
+    const gitlabSubgroupMatch = cleanUrl.match(/^git@gitlab\.com:(.+?)\/([^/]+?)(?:\.git)?$/);
+    if (gitlabSubgroupMatch) {
+      const [, ownerPath, name] = gitlabSubgroupMatch;
+      return {
+        url: cleanUrl,
+        host: "gitlab.com",
+        owner: ownerPath,
+        name,
+        defaultBranch: "main",
+      };
+    }
+
+    // Handle self-hosted GitLab/Gitea/etc with custom domains
+    const selfHostedMatch = cleanUrl.match(/^git@([^:]+):(.+?)\/([^/]+?)(?:\.git)?$/);
+    if (selfHostedMatch) {
+      const [, host, owner, name] = selfHostedMatch;
+      return {
+        url: cleanUrl,
+        host,
+        owner,
+        name,
+        defaultBranch: "main",
+      };
+    }
+
+    // Handle SourceHut (git.sr.ht)
+    const sourceHutMatch = cleanUrl.match(/^https?:\/\/git\.sr\.ht\/~([^/]+)\/([^/]+?)(?:\/.*)?$/);
+    if (sourceHutMatch) {
+      const [, owner, name] = sourceHutMatch;
+      return {
+        url: cleanUrl,
+        host: "git.sr.ht", 
+        owner: `~${owner}`,
+        name,
+        defaultBranch: "master", // SourceHut typically uses master
+      };
+    }
+
     // Handle file:// URLs for local repositories
     const fileMatch = cleanUrl.match(/^file:\/\/(.+)$/);
     if (fileMatch) {
@@ -104,6 +149,11 @@ export class GitUrlParserImpl implements GitUrlParser {
       return `https://dev.azure.com/${org}/${project}/_git/${repoInfo.name}`;
     }
 
+    if (repoInfo.host === "git.sr.ht") {
+      // SourceHut special case
+      return `https://git.sr.ht/${repoInfo.owner}/${repoInfo.name}`;
+    }
+
     return `https://${repoInfo.host}/${repoInfo.owner}/${repoInfo.name}`;
   }
 
@@ -115,6 +165,80 @@ export class GitUrlParserImpl implements GitUrlParser {
       return `git@ssh.dev.azure.com:v3/${repoInfo.owner}/${repoInfo.name}`;
     }
 
+    if (repoInfo.host === "git.sr.ht") {
+      return `git@git.sr.ht:${repoInfo.owner}/${repoInfo.name}`;
+    }
+
     return `git@${repoInfo.host}:${repoInfo.owner}/${repoInfo.name}.git`;
+  }
+
+  /**
+   * Detect provider-specific features and defaults
+   */
+  getProviderInfo(host: string): {
+    name: string;
+    defaultBranch: string;
+    supportsApi: boolean;
+    apiBaseUrl?: string;
+  } {
+    const normalizedHost = host.toLowerCase();
+    
+    switch (normalizedHost) {
+      case "github.com":
+        return {
+          name: "GitHub",
+          defaultBranch: "main",
+          supportsApi: true,
+          apiBaseUrl: "https://api.github.com",
+        };
+      
+      case "gitlab.com":
+        return {
+          name: "GitLab.com",
+          defaultBranch: "main",
+          supportsApi: true,
+          apiBaseUrl: "https://gitlab.com/api/v4",
+        };
+      
+      case "bitbucket.org":
+        return {
+          name: "Bitbucket",
+          defaultBranch: "main",
+          supportsApi: true,
+          apiBaseUrl: "https://api.bitbucket.org/2.0",
+        };
+      
+      case "dev.azure.com":
+        return {
+          name: "Azure DevOps",
+          defaultBranch: "main",
+          supportsApi: true,
+          apiBaseUrl: "https://dev.azure.com",
+        };
+      
+      case "git.sr.ht":
+        return {
+          name: "SourceHut",
+          defaultBranch: "master",
+          supportsApi: true,
+          apiBaseUrl: "https://git.sr.ht/api",
+        };
+      
+      case "codeberg.org":
+        return {
+          name: "Codeberg",
+          defaultBranch: "main",
+          supportsApi: true,
+          apiBaseUrl: "https://codeberg.org/api/v1",
+        };
+      
+      default:
+        // Generic Git provider
+        return {
+          name: "Git Provider",
+          defaultBranch: "main",
+          supportsApi: false,
+        };
+    }
   }
 }
