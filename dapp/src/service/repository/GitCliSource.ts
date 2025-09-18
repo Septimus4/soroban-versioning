@@ -228,24 +228,19 @@ export class GitCliSource implements RepositorySource {
   }
 
   private async buildAuthenticatedUrl(url: string, credentials: any): Promise<string> {
-    if (credentials.type === "https" && credentials.tokenOrPassword) {
+    // For public repositories, use the URL as-is
+    // Convert SSH URLs to HTTPS for public access
+    if (url.startsWith("git@")) {
       const repoInfo = this.urlParser.parse(url);
-      const httpsUrl = this.toHttpsUrl(repoInfo);
-      
-      if (credentials.username) {
-        return httpsUrl.replace(
-          "https://",
-          `https://${credentials.username}:${credentials.tokenOrPassword}@`
-        );
-      } else {
-        return httpsUrl.replace(
-          "https://",
-          `https://${credentials.tokenOrPassword}@`
-        );
-      }
+      return this.toHttpsUrl(repoInfo);
     }
-
+    
     return url;
+  }
+
+  private async buildGitEnvironment(credentials: any): Promise<Record<string, string>> {
+    // For public repositories, no special environment needed
+    return {};
   }
 
   private toHttpsUrl(repoInfo: RepositoryInfo): string {
@@ -256,21 +251,6 @@ export class GitCliSource implements RepositorySource {
     }
 
     return `https://${repoInfo.host}/${repoInfo.owner}/${repoInfo.name}`;
-  }
-
-  private async buildGitEnvironment(credentials: any): Promise<Record<string, string>> {
-    const env: Record<string, string> = {};
-
-    if (credentials.type === "ssh") {
-      if (credentials.privateKeyPath) {
-        env.GIT_SSH_COMMAND = `ssh -i ${credentials.privateKeyPath}`;
-      }
-      if (credentials.sshAgent) {
-        env.SSH_AUTH_SOCK = credentials.sshAgent;
-      }
-    }
-
-    return env;
   }
 
   private parseCommitData(oid: string, data: string): Commit {

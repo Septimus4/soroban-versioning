@@ -1,0 +1,307 @@
+---
+sidebar_position: 9
+title: Git Repository Service
+description: Provider-agnostic Git repository abstraction supporting any Git provider
+---
+
+# Generic Git Repository Service
+
+This service provides a provider-agnostic Git repository abstraction that works with any Git remote (GitHub, GitLab, Bitbucket, Azure DevOps, self-hosted, etc.) over HTTPS/SSH, without depending on provider-specific APIs.
+
+## Architecture Overview
+
+### Core Components
+
+1. **RepositorySource Interface** - Generic Git operations abstraction
+2. **GitCliSource** - Server-side implementation using native Git CLI commands  
+3. **BrowserCompatibleSource** - Browser fallback using provider APIs
+4. **RepositoryFactory** - Smart factory that selects appropriate source
+5. **EnhancedCredentialManager** - Multi-provider credential management
+6. **GitUrlParser** - Universal Git URL parsing and normalization
+
+### Smart Environment Detection
+
+The system automatically chooses the best implementation:
+
+- **Server Environment (Node.js)**: Uses `GitCliSource` with native Git commands
+- **Browser Environment**: Falls back to `BrowserCompatibleSource` with HTTP APIs
+- **No Git CLI Available**: Automatically uses browser-compatible mode
+
+## Supported Git Providers
+
+### First-Class Support
+- ✅ **GitHub** (github.com)
+- ✅ **GitLab** (gitlab.com + self-hosted)  
+- ✅ **Bitbucket** (bitbucket.org)
+- ✅ **Azure DevOps** (dev.azure.com)
+- ✅ **Codeberg** (codeberg.org)
+- ✅ **SourceHut** (git.sr.ht)
+- ✅ **Gitea** (gitea.io + self-hosted)
+- ✅ **Local repositories** (file://)
+
+### Universal Support
+- ✅ **Any Git remote** accessible via HTTPS/SSH
+- ✅ **Self-hosted instances** of supported providers
+- ✅ **Custom Git servers** with standard Git protocol
+
+## Usage Examples
+
+### Basic Usage (Drop-in Replacement)
+
+```typescript
+// Replace this:
+import { getCommitHistory } from "../service/GithubService";
+
+// With this:
+import { getCommitHistory } from "../service/GitRepositoryService";
+
+// Same API, works with any Git provider!
+const history = await getCommitHistory("owner", "repo", 1, 30);
+```
+
+### Advanced Usage
+
+```typescript
+import { RepositoryFactory } from "./repository";
+
+// Create repository source
+const repo = RepositoryFactory.createRepositorySource();
+
+// Initialize with any Git URL
+await repo.init("/tmp/repo", "https://gitlab.com/owner/project");
+await repo.update();
+
+// Generic Git operations
+const commits = await repo.listCommits({ maxCount: 10 });
+const latestSha = await repo.resolveRef("main");
+const commit = await repo.getCommit(latestSha);
+```
+
+### Multi-Provider Support
+
+```typescript
+const gitHubRepo = "https://github.com/owner/repo";
+const gitLabRepo = "https://gitlab.com/group/project";
+const azureRepo = "https://dev.azure.com/org/project/_git/repo";
+
+// Same code works with all providers
+for (const repoUrl of [gitHubRepo, gitLabRepo, azureRepo]) {
+  const repo = RepositoryFactory.createRepositorySource();
+  await repo.init("", repoUrl);
+  const info = await repo.getRepositoryInfo();
+  console.log(`${info.host}: ${info.owner}/${info.name}`);
+}
+```
+
+## Public Repository Access
+
+This service is designed to work with **public repositories** and uses simplified credential management. No authentication tokens or SSH keys are required for accessing public repositories.
+
+### Supported Public Providers
+
+The service automatically handles public repository access for:
+
+- **GitHub** (github.com)
+- **GitLab** (gitlab.com + self-hosted)
+- **Bitbucket** (bitbucket.org)
+- **Azure DevOps** (dev.azure.com)
+- **Codeberg** (codeberg.org)
+- **SourceHut** (git.sr.ht)
+- **Gitea** (gitea.io + self-hosted)
+- **Any public Git remote** over HTTPS
+
+### Automatic Protocol Handling
+
+The system automatically converts SSH URLs to HTTPS for public access:
+
+```typescript
+// SSH URL automatically converted to HTTPS
+const sshUrl = "git@github.com:owner/repo.git";
+const httpsUrl = "https://github.com/owner/repo"; // Used internally
+```
+
+## Git CLI vs HTTP API
+
+### Git CLI Source (Server-Side)
+
+**Advantages:**
+- 🚀 **Performance**: Partial clones, sparse-checkout, efficient operations
+- 🔧 **Full Git Features**: Supports all Git operations and configurations  
+- 🛡️ **Security**: Uses system Git configuration and SSH agents
+- 📊 **Rich Metadata**: Access to complete Git object database
+
+**Git Commands Used:**
+```bash
+# Clone with performance optimizations
+git clone --filter=blob:none --no-checkout <url>
+
+# List commits
+git rev-list --topo-order --max-count=30 HEAD
+
+# Get commit data  
+git cat-file -p <sha>
+
+# Get file content
+git cat-file -p <sha>:<path>
+
+# Generate diffs
+git diff-tree -p <base> <head>
+```
+
+### Browser Compatible Source
+
+**Advantages:** 
+- 🌐 **Universal**: Works in any browser environment
+- ⚡ **Quick Setup**: No Git CLI installation required
+- 🔌 **API Rich**: Can access provider-specific metadata
+
+**Limitations:**
+- Limited to providers with HTTP APIs
+- No access to advanced Git features
+- Depends on provider API rate limits
+
+## Migration Guide
+
+### From GitHub-Specific Code
+
+```typescript
+// Before: GitHub API calls
+const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits`);
+const commits = await response.json();
+
+// After: Generic Git operations
+const repo = RepositoryFactory.createRepositorySource();
+await repo.init("", `https://github.com/${owner}/${repo}`);
+const commits = await repo.listCommits();
+```
+
+### From Provider-Specific SDKs
+
+```typescript
+// Before: GitLab SDK
+import { Gitlab } from '@gitbeaker/node';
+const api = new Gitlab({ token: 'xxx' });
+const commits = await api.Commits.all(projectId);
+
+// After: Generic interface
+const repo = RepositoryFactory.createRepositorySource();  
+await repo.init("", "https://gitlab.com/group/project");
+const commits = await repo.listCommits();
+```
+
+## Performance Optimizations
+
+### Partial Clones
+```bash
+# Only download commit metadata, not file contents
+git clone --filter=blob:none
+```
+
+### Sparse Checkout  
+```bash
+# Only checkout specific directories
+git sparse-checkout set src/ docs/
+```
+
+### Repository Caching
+The system automatically caches repository instances to avoid repeated clone operations.
+
+## Error Handling
+
+```typescript
+import { RepositoryFactory } from "./repository";
+
+try {
+  const repo = RepositoryFactory.createRepositorySource();
+  await repo.init("/tmp/repo", "https://private-repo.com/owner/repo");
+} catch (error) {
+  if (error.message.includes("authentication")) {
+    console.log("Check your credentials for private-repo.com");
+  } else if (error.message.includes("not found")) {
+    console.log("Repository does not exist or is not accessible");
+  }
+}
+```
+
+## Testing Different Providers
+
+```typescript
+// Test suite for multiple providers
+const testProviders = [
+  { name: "GitHub", url: "https://github.com/octocat/Hello-World" },
+  { name: "GitLab", url: "https://gitlab.com/gitlab-org/gitlab-foss" },
+  { name: "Bitbucket", url: "https://bitbucket.org/atlassian/stash-example-plugin" },
+];
+
+for (const provider of testProviders) {
+  const repo = RepositoryFactory.createRepositorySource();
+  await repo.init("", provider.url);
+  const info = await repo.getRepositoryInfo();
+  console.log(`✅ ${provider.name}: ${info.defaultBranch}`);
+}
+```
+
+## Extending Support
+
+### Adding New Providers
+
+1. **Update GitUrlParser** with new URL patterns
+2. **Add Credential defaults** in EnhancedCredentialManager  
+3. **Add Provider info** in getProviderInfo method
+4. **Test with sample repositories**
+
+### Custom Authentication
+
+```typescript
+class CustomCredentialManager extends EnhancedCredentialManager {
+  async forHost(host: string): Promise<CredentialInfo> {
+    if (host === "internal-git.company.com") {
+      return {
+        type: "https",
+        username: await this.getCompanyUsername(),
+        tokenOrPassword: await this.getCompanyToken(),
+      };
+    }
+    return super.forHost(host);
+  }
+}
+```
+
+## Security Considerations
+
+- 🔐 **Credential Isolation**: Each host gets separate credentials
+- 🛡️ **No Credential Logging**: Debug info never exposes tokens/keys
+- 🔑 **SSH Agent Support**: Integrates with system SSH configuration
+- 🚫 **Sandboxed Execution**: Git operations run in controlled environment
+
+## Troubleshooting
+
+### Common Issues
+
+1. **"Module externalized for browser compatibility"**
+   - This is expected - Vite is correctly handling Node.js modules
+   - The system will automatically use browser-compatible fallbacks
+
+2. **Authentication Failures** 
+   - Check environment variables are set correctly
+   - Verify token permissions for private repositories
+   - For SSH: ensure SSH agent is running and keys are loaded
+
+3. **Git CLI Not Found**
+   - System automatically falls back to HTTP APIs
+   - Install Git for better performance and features
+
+### Debug Information
+
+```typescript
+const credManager = RepositoryFactory.getCredentialManager();
+console.log(credManager.getDebugInfo());
+
+// Output:
+// {
+//   "github.com": { type: "https", hasToken: true, hasKey: false },
+//   "gitlab.com": { type: "ssh", hasToken: false, hasKey: true }
+// }
+```
+
+This architecture provides a robust, provider-agnostic foundation for Git operations while maintaining excellent performance and security.
