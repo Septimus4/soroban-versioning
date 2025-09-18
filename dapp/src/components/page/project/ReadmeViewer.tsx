@@ -1,7 +1,7 @@
 import { useStore } from "@nanostores/react";
 import Markdown from "markdown-to-jsx";
 import { useEffect, useState } from "react";
-import { fetchReadmeContentFromConfigUrl } from "../../../service/GithubService";
+import { fetchReadmeContentFromConfigUrl } from "../../../service/GitRepositoryService";
 import { loadProjectInfo } from "../../../service/StateService";
 import { projectInfoLoaded } from "../../../utils/store";
 import DOMPurify from "dompurify";
