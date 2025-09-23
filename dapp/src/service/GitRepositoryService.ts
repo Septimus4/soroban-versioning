@@ -80,11 +80,40 @@ class GitRepositoryServiceImpl {
   ): Promise<{ date: string; commits: FormattedCommit[] }[] | null> {
     try {
       const repoUrl = `https://github.com/${username}/${repo}`;
-      const repository = await this.getRepository(repoUrl);
       
-      if (!repository) {
-        return null;
+      // Check cache first
+      if (this.repositoryCache.has(repoUrl)) {
+        const repository = this.repositoryCache.get(repoUrl)!;
+        const skip = (page - 1) * perPage;
+        const commits = await repository.listCommits({
+          maxCount: perPage,
+          skip,
+          topo: true,
+        });
+
+        const formattedCommits = commits.map(commit => 
+          this.formatCommit(commit, { username, repoName: repo })
+        );
+
+        return this.groupCommitsByDate(formattedCommits);
       }
+
+      // Create new repository instance
+      const repository = RepositoryFactory.createRepositorySource();
+      
+      // Only use local directory for Git CLI sources in Node.js environment
+      let localDir = "";
+      if (typeof process !== "undefined" && process.versions && process.versions.node) {
+        // Dynamically import Node.js modules
+        const { join } = await import("path");
+        const { tmpdir } = await import("os");
+        localDir = join(tmpdir(), "git-repos", `${username}-${repo}`);
+      }
+      
+      await repository.init(localDir, repoUrl);
+      await repository.update();
+      
+      this.repositoryCache.set(repoUrl, repository);
 
       const skip = (page - 1) * perPage;
       const commits = await repository.listCommits({
@@ -97,31 +126,38 @@ class GitRepositoryServiceImpl {
         this.formatCommit(commit, { username, repoName: repo })
       );
 
-      // Group commits by date (same logic as original)
-      const groupedCommits = formattedCommits.reduce(
-        (acc: Record<string, FormattedCommit[]>, commit: FormattedCommit) => {
-          const date = new Date(commit.commit_date).toISOString().split("T")[0];
-          if (!date) {
-            return acc;
-          }
-          if (!acc[date]) {
-            acc[date] = [];
-          }
-          acc[date].push(commit);
-          return acc;
-        },
-        {},
-      );
-
-      // Convert grouped commits to array format
-      return Object.entries(groupedCommits).map(([date, commits]) => ({
-        date,
-        commits: commits as FormattedCommit[],
-      }));
+      return this.groupCommitsByDate(formattedCommits);
     } catch (error) {
-      console.warn("Failed to get commit history:", error);
+      console.warn(`Failed to get commit history for ${username}/${repo}:`, error);
       return null;
     }
+  }
+
+  /**
+   * Group commits by date
+   */
+  private groupCommitsByDate(formattedCommits: FormattedCommit[]): { date: string; commits: FormattedCommit[] }[] {
+    // Group commits by date (same logic as original)
+    const groupedCommits = formattedCommits.reduce(
+      (acc: Record<string, FormattedCommit[]>, commit: FormattedCommit) => {
+        const date = new Date(commit.commit_date).toISOString().split("T")[0];
+        if (!date) {
+          return acc;
+        }
+        if (!acc[date]) {
+          acc[date] = [];
+        }
+        acc[date].push(commit);
+        return acc;
+      },
+      {},
+    );
+
+    // Convert grouped commits to array format
+    return Object.entries(groupedCommits).map(([date, commits]) => ({
+      date,
+      commits: commits as FormattedCommit[],
+    }));
   }
 
   /**
