@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getCommitHistory } from "../../../service/GithubService.ts";
 import {
   loadConfigData,
+  loadProjectInfo,
   loadProjectRepoInfo,
 } from "../../../service/StateService.ts";
 import { formatDate } from "../../../utils/formatTimeFunctions.ts";
@@ -18,12 +19,12 @@ const CommitHistory = () => {
 
   const fetchCommitHistory = async (page = 1) => {
     const projectRepoInfo = loadProjectRepoInfo();
-    if (projectRepoInfo?.author && projectRepoInfo?.repository) {
-      const history = await getCommitHistory(
-        projectRepoInfo.author,
-        projectRepoInfo.repository,
-        page,
-      );
+    const projectInfo = loadProjectInfo();
+    const repoUrl =
+      projectRepoInfo?.repositoryUrl || projectInfo?.config.url || "";
+
+    if (repoUrl) {
+      const history = await getCommitHistory(repoUrl, page);
       setCommitHistory(history);
       setCurrentPage(page);
 
@@ -93,9 +94,9 @@ const CommitHistory = () => {
                       message={commit.message}
                       date={commit.commit_date}
                       authorName={commit.author.name}
-                      authorGithubLink={commit.author.html_url}
+                      authorGithubLink={commit.author.html_url || undefined}
                       sha={commit.sha}
-                      commitLink={commit.html_url}
+                      commitLink={commit.html_url || undefined}
                       isMaintainer={
                         authors
                           ? authors.includes(commit.author.name.toLowerCase())

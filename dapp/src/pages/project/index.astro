@@ -30,7 +30,6 @@ import ProjectInfoTitle from "../../components/page/project/ProjectInfoTitle.ast
     setProjectLatestSha,
     setProjectRepoInfo,
   } from "../../service/StateService";
-  import { getAuthorRepo } from "../../utils/editLinkFunctions";
   import { projectInfoLoaded } from "../../utils/store";
   import { extractConfigData, toast } from "../../utils/utils";
 
@@ -43,9 +42,8 @@ import ProjectInfoTitle from "../../components/page/project/ProjectInfoTitle.ast
         const project = await getProjectFromName(projectName);
         if (project && project.name && project.config && project.maintainers) {
           setProject(project);
-          const { username, repoName } = getAuthorRepo(project.config.url);
-          if (username && repoName) {
-            setProjectRepoInfo(username, repoName);
+          if (project.config.url) {
+            setProjectRepoInfo(project.config.url);
           }
           const tomlData = await fetchTomlFromCid(project.config.ipfs);
           if (tomlData) {

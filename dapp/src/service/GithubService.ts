@@ -1,82 +1,67 @@
-import axios from "axios";
-
 import type { FormattedCommit } from "../types/github";
-import {
-  getAuthorRepo,
-  getGithubContentUrlFromReadmeUrl,
-} from "../utils/editLinkFunctions";
+const GIT_API_ENDPOINT = "/api/git";
+
+function buildGitApiUrl(params: Record<string, string | number>): string {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    searchParams.set(key, String(value));
+  });
+  return `${GIT_API_ENDPOINT}?${searchParams.toString()}`;
+}
 
 async function getCommitHistory(
-  username: string,
-  repo: string,
+  repositoryUrl: string,
   page: number = 1,
   perPage: number = 30,
-): Promise<{ date: string; commits: FormattedCommit[] }[] | null> {
+): Promise<{ date: string; commits: FormattedCommit[] }[]> {
+  if (!repositoryUrl) {
+    return [];
+  }
+
   try {
-    const response = await axios.get(
-      `https://api.github.com/repos/${username}/${repo}/commits`,
-      {
-        params: { per_page: perPage, page: page },
-        headers: { Accept: "application/vnd.github.v3+json" },
-      },
+    const response = await fetch(
+      buildGitApiUrl({
+        action: "history",
+        repoUrl: repositoryUrl,
+        page,
+        perPage,
+      }),
     );
 
-    const formattedCommits = response.data.map((commit: any) => ({
-      message: commit.commit.message,
-      author: {
-        name: commit.commit.author.name,
-        html_url: commit.author ? commit.author.html_url : "",
-      },
-      commit_date: commit.commit.author.date,
-      html_url: commit.html_url,
-      sha: commit.sha,
-    }));
+    if (!response.ok) {
+      return [];
+    }
 
-    // Group commits by date
-    const groupedCommits = formattedCommits.reduce(
-      (acc: Record<string, FormattedCommit[]>, commit: FormattedCommit) => {
-        const date = new Date(commit.commit_date).toISOString().split("T")[0];
-        if (!date) {
-          return acc;
-        }
-        if (!acc[date]) {
-          acc[date] = [];
-        }
-        acc[date].push(commit);
-        return acc;
-      },
-      {},
-    );
+    const history = await response.json();
+    if (!Array.isArray(history)) {
+      return [];
+    }
 
-    // Convert grouped commits to array format
-    return Object.entries(groupedCommits).map(([date, commits]) => ({
-      date,
-      commits: commits as FormattedCommit[],
-    }));
+    return history as { date: string; commits: FormattedCommit[] }[];
   } catch {
-    // Don't show error toast as this may be an expected condition
-    // (e.g., repository is private or doesn't exist)
-    return null;
+    return [];
   }
 }
 
 async function getCommitDataFromSha(
-  owner: string,
-  repo: string,
+  repositoryUrl: string,
   sha: string,
 ): Promise<any> {
+  if (!repositoryUrl || !sha) {
+    return undefined;
+  }
+
   try {
-    const url = `https://api.github.com/repos/${owner}/${repo}/commits/${sha}`;
-    const response = await fetch(url);
+    const response = await fetch(
+      buildGitApiUrl({ action: "commit", repoUrl: repositoryUrl, sha }),
+    );
 
     if (!response.ok) {
-      // Expected condition (commit may not exist)
       return undefined;
     }
 
     return await response.json();
   } catch {
-    // Don't show error toast as this may be an expected condition
     return undefined;
   }
 }
@@ -85,72 +70,54 @@ async function getLatestCommitData(
   configUrl: string,
   sha: string,
 ): Promise<any> {
-  const { username, repoName } = getAuthorRepo(configUrl);
-  if (!username || !repoName) {
-    // Expected condition (URL may be malformed)
-    return undefined;
-  }
-
-  return await getCommitDataFromSha(username, repoName, sha);
+  return await getCommitDataFromSha(configUrl, sha);
 }
 
 async function getLatestCommitHash(
   configUrl: string,
 ): Promise<string | undefined> {
-  const { username, repoName } = getAuthorRepo(configUrl);
-  if (!username || !repoName) {
-    // Expected condition (URL may be malformed)
+  if (!configUrl) {
     return undefined;
   }
 
   try {
-    const repoRes = await fetch(
-      `https://api.github.com/repos/${username}/${repoName}`,
+    const response = await fetch(
+      buildGitApiUrl({ action: "latest", repoUrl: configUrl }),
     );
-    if (!repoRes.ok) {
-      // Expected condition (repo may not exist or be private)
+    if (!response.ok) {
       return undefined;
     }
 
-    const repoData = await repoRes.json();
-    const defaultBranch = repoData.default_branch;
-
-    const commitRes = await fetch(
-      `https://api.github.com/repos/${username}/${repoName}/commits/${defaultBranch}`,
-    );
-    if (!commitRes.ok) {
-      // Expected condition (branch may not exist)
-      return undefined;
+    const payload = await response.json();
+    if (payload && typeof payload.sha === "string") {
+      return payload.sha;
     }
-
-    const latestCommit = await commitRes.json();
-    const latestSha = latestCommit.sha;
-    return latestSha;
+    return undefined;
   } catch {
-    // Don't show error toast as these are often expected conditions
     return undefined;
   }
 }
 
 async function fetchReadmeContentFromConfigUrl(configUrl: string) {
+  if (!configUrl) {
+    return undefined;
+  }
+
   try {
-    const url = getGithubContentUrlFromReadmeUrl(configUrl);
+    const response = await fetch(
+      buildGitApiUrl({ action: "file", repoUrl: configUrl, path: "README.md" }),
+    );
 
-    if (url) {
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        // Expected condition (readme may not exist)
-        return undefined;
-      }
-
-      const tomlText = await response.text();
-      return tomlText;
+    if (!response.ok) {
+      return undefined;
     }
 
+    const payload = await response.json();
+    if (payload && typeof payload.content === "string") {
+      return payload.content;
+    }
     return undefined;
   } catch {
-    // Don't show error toast as this may be an expected condition
     return undefined;
   }
 }

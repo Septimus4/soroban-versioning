@@ -29,11 +29,9 @@ const projectInfo: {
 };
 
 const projectRepoInfo: {
-  project_author: string | undefined;
-  project_repository: string | undefined;
+  repository_url: string | undefined;
 } = {
-  project_author: undefined,
-  project_repository: undefined,
+  repository_url: undefined,
 };
 
 const projectLatestSha: {
@@ -54,8 +52,7 @@ function refreshLocalStorage(): void {
     projectInfo.project_maintainers = undefined;
     projectInfo.project_config_url = undefined;
     projectInfo.project_config_ipfs = undefined;
-    projectRepoInfo.project_author = undefined;
-    projectRepoInfo.project_repository = undefined;
+    projectRepoInfo.repository_url = undefined;
     projectLatestSha.sha = undefined;
     configData = undefined;
   }
@@ -87,9 +84,8 @@ function setProject(project: Project): void {
   }
 }
 
-function setProjectRepoInfo(author: string, repository: string): void {
-  projectRepoInfo.project_author = author;
-  projectRepoInfo.project_repository = repository;
+function setProjectRepoInfo(repositoryUrl: string): void {
+  projectRepoInfo.repository_url = repositoryUrl;
   if (typeof window !== "undefined") {
     projectRepoInfoStore.set(projectRepoInfo);
   }
@@ -143,15 +139,12 @@ function loadProjectInfo(): Project | undefined {
   };
 }
 
-function loadProjectRepoInfo():
-  | { author: string; repository: string }
-  | undefined {
-  if (!projectRepoInfo.project_author || !projectRepoInfo.project_repository) {
+function loadProjectRepoInfo(): { repositoryUrl: string } | undefined {
+  if (!projectRepoInfo.repository_url) {
     return undefined;
   }
   return {
-    author: projectRepoInfo.project_author,
-    repository: projectRepoInfo.project_repository,
+    repositoryUrl: projectRepoInfo.repository_url,
   };
 }
 

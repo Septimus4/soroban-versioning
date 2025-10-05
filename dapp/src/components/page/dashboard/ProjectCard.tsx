@@ -11,10 +11,7 @@ import {
   setProjectLatestSha,
   setProjectRepoInfo,
 } from "../../../service/StateService";
-import {
-  convertGitHubLink,
-  getAuthorRepo,
-} from "../../../utils/editLinkFunctions";
+import { convertGitHubLink } from "../../../utils/editLinkFunctions";
 import { projectCardModalOpen } from "../../../utils/store";
 import { extractConfigData, toast } from "../../../utils/utils";
 
@@ -38,9 +35,8 @@ const ProjectCard = ({ config }: { config: ProjectConfig }) => {
       const project = await getProjectFromName(config.projectName);
       if (project && project.name && project.config && project.maintainers) {
         setProject(project);
-        const { username, repoName } = getAuthorRepo(project.config.url);
-        if (username && repoName) {
-          setProjectRepoInfo(username, repoName);
+        if (project.config.url) {
+          setProjectRepoInfo(project.config.url);
         }
         const tomlData = await fetchTomlFromCid(project.config.ipfs);
         if (tomlData) {
